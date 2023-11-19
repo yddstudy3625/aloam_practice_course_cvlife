@@ -140,7 +140,7 @@ void laserCloudLink3DHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudM
     pcl::fromROSMsg(*laserCloudMsg, *laserCloudIn);
     mpLink3dExtractor->process(laserCloudIn, mvAggregationKeypoints, mDescriptors, mClusterEdgeKeypoints);
     for (const auto& one : mvAggregationKeypoints) {
-        link3DKeyPoints.emplace_back(one);
+        link3DKeyPoints.push_back(one);
     }
 
     sensor_msgs::PointCloud2 link3DKeyP;
