@@ -3,7 +3,6 @@
 #include <vector>
 #include <map>
 #include <set>
-
 #include <pcl/point_types.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/extract_indices.h>
@@ -13,8 +12,38 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/opencv.hpp>
 #include <math.h>
+#include <ceres/ceres.h>
 
 using namespace std;
+using namespace cv;
+struct ICPCeres
+{
+    ICPCeres ( Point3f uvw,Point3f xyz ) : _uvw(uvw),_xyz(xyz) {}
+    // 残差的计算
+    template <typename T>
+    bool operator() (
+            const T* const camera,     // 模型参数，有4维
+            T* residual ) const     // 残差
+    {
+        T p[3];
+        T point[3];
+        point[0]=T(_xyz.x);
+        point[1]=T(_xyz.y);
+        point[2]=T(_xyz.z);
+        AngleAxisRotatePoint(camera, point, p);//计算RP
+        p[0] += camera[3]; p[1] += camera[4]; p[2] += camera[5];//相机坐标2
+        residual[0] = T(_uvw.x)-p[0];
+        residual[1] = T(_uvw.y)-p[1];
+        residual[2] = T(_uvw.z)-p[2];
+        return true;
+    }
+    static ceres::CostFunction* Create(const Point3f uvw,const Point3f xyz) {
+        return (new ceres::AutoDiffCostFunction<ICPCeres, 3, 6>(
+                new ICPCeres(uvw,xyz)));
+    }
+    const Point3f _uvw;
+    const Point3f _xyz;
+};
 
 
 struct PointXYZSCA
@@ -107,6 +136,9 @@ namespace BoW3D
             int matchTh;           
             int scanNumTh;
             int ptNumTh;
+
+            vector<pcl::PointXYZI> keyPoints_last_;
+            cv::Mat descriptors_last_;
 
             float cloudCurvature[400000];
     };

@@ -580,27 +580,28 @@ namespace BoW3D
             //The final descriptor is based on the priority of the three closest keypoint.
             for(int indNum = 0; indNum < 3; indNum++)
             {
-                int index = Index[indNum];
+                int index = Index[indNum]; // 获取3个最近的距离在表中的索引
                 Eigen::Vector2f mainDirection;
-                mainDirection = directionTab[i][index];
+                mainDirection = directionTab[i][index]; // 主方向，即 k0与k1距离最近的方向
                 
                 vector<vector<float>> areaDis(180);  
-                areaDis[0].emplace_back(distanceTab[i][index]);
+                areaDis[0].emplace_back(distanceTab[i][index]); // 主方向对应的距离
                           
                 for(size_t j = 0; j < keyPoints.size(); j++)
                 {
-                    if(j == i || (int)j == index)
+                    if(j == i || (int)j == index) // 跳过自己与3个最近点
                     {
                         continue;
                     }
                     
-                    Eigen::Vector2f otherDirection = directionTab[i][j];
+                    Eigen::Vector2f otherDirection = directionTab[i][j]; // 三个最近点之外的其他方向
                 
                     Eigen::Matrix2f matrixDirect;
                     matrixDirect << mainDirection(0, 0), mainDirection(1, 0), otherDirection(0, 0), otherDirection(1, 0);
-                    float deter = matrixDirect.determinant();
+                    float deter = matrixDirect.determinant(); // 主方向与其他方向求行列式
 
                     int areaNum = 0;
+                    // k0 与 k2 的夹角，弧度表示
                     double cosAng = (double)mainDirection.dot(otherDirection) / (double)(mainDirection.norm() * otherDirection.norm());                                 
                     if(abs(cosAng) - 1 > 0)
                     {   
@@ -614,11 +615,11 @@ namespace BoW3D
                         continue;
                     }
                     
-                    if(deter > 0)
+                    if(deter > 0) // 行列式大于0
                     {
                         areaNum = ceil((angle - 1) / 2);                         
                     }
-                    else
+                    else // 行列式小于0
                     {
                         if(angle - 2 < 0)
                         { 
@@ -633,25 +634,25 @@ namespace BoW3D
 
                     if(areaNum != 0)
                     {
-                        areaDis[areaNum].emplace_back(distanceTab[i][j]);
+                        areaDis[areaNum].emplace_back(distanceTab[i][j]); // 放入每个区域的距离，第一个维度是扇区
                     }
                 }
                 
-                float *descriptor = descriptors.ptr<float>(i);                                
+                float *descriptor = descriptors.ptr<float>(i); // 行指针，指向当前点描述子向量                               
 
-                for(int areaNum = 0; areaNum < 180; areaNum++) 
+                for(int areaNum = 0; areaNum < 180; areaNum++) // 遍历 180个扇区
                 {
-                    if(areaDis[areaNum].size() == 0)
+                    if(areaDis[areaNum].size() == 0) // 如果该扇区没有点
                     {
                         continue;
                     }
                     else
                     {
-                        std::sort(areaDis[areaNum].begin(), areaDis[areaNum].end());
+                        std::sort(areaDis[areaNum].begin(), areaDis[areaNum].end()); // 根据距离对该扇区进行排序
 
                         if(descriptor[areaNum] == 0)
                         {
-                            descriptor[areaNum] = areaDis[areaNum][0]; 
+                            descriptor[areaNum] = areaDis[areaNum][0]; // 该扇区的最近距离作为描述值
                         }                        
                     }
                 }                
@@ -869,7 +870,17 @@ namespace BoW3D
         vector<int> index;
         keyPoints = getMeanKeyPoint(clusters, validCluster);
         // 3. 创建描述子
-        getDescriptors(keyPoints, descriptors); 
+        getDescriptors(keyPoints, descriptors);
+
+        if(!keyPoints_last_.size()) {
+            vector<pair<int, int>> index_match;
+            index_match.clear();
+            match(keyPoints, keyPoints_last_, descriptors, descriptors_last_, index_match);
+        }
+
+        keyPoints_last_.assign(keyPoints.begin(),keyPoints.end());
+        descriptors_last_ = descriptors;
+       
     }
 
 }
