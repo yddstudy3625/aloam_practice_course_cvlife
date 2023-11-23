@@ -55,6 +55,8 @@
 #include <tf/transform_broadcaster.h>
 
 #include "linK3DExtractor.h"
+#include <nav_msgs/Path.h>
+#include <nav_msgs/Odometry.h>
 
 using std::atan2;
 using std::cos;
@@ -87,6 +89,8 @@ ros::Publisher pubSurfPointsFlat;
 ros::Publisher pubSurfPointsLessFlat;
 ros::Publisher pubRemovePoints;
 ros::Publisher pubLink3DKeyPoints;
+ros::Publisher pubLaserOdometry;
+ros::Publisher pubLaserPath;
 std::vector<ros::Publisher> pubEachScan;
 
 bool PUB_EACH_LINE = false;
@@ -133,12 +137,16 @@ void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
 
 void laserCloudLink3DHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
 {
+    static Eigen::Quaterniond q_w_curr(1, 0, 0, 0);
+    static Eigen::Vector3d t_w_curr(0, 0, 0);
     pcl::PointCloud<pcl::PointXYZ>::Ptr laserCloudIn(new pcl::PointCloud<pcl::PointXYZ>());
     pcl::PointCloud<pcl::PointXYZI> link3DKeyPoints;
     // pcl::PointCloud<pcl::PointXYZ> laserCloudIn;
     // transform ros data to pcl
     pcl::fromROSMsg(*laserCloudMsg, *laserCloudIn);
-    mpLink3dExtractor->process(laserCloudIn, mvAggregationKeypoints, mDescriptors, mClusterEdgeKeypoints);
+    ros::Time timestamp = laserCloudMsg->header.stamp;
+    mpLink3dExtractor->process(laserCloudIn, mvAggregationKeypoints, mDescriptors, 
+                               mClusterEdgeKeypoints, timestamp, q_w_curr, t_w_curr);
     for (const auto& one : mvAggregationKeypoints) {
         link3DKeyPoints.push_back(one);
     }
@@ -148,6 +156,28 @@ void laserCloudLink3DHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudM
     link3DKeyP.header.stamp = laserCloudMsg->header.stamp;
     link3DKeyP.header.frame_id = "camera_init";
     pubLink3DKeyPoints.publish(link3DKeyP);
+
+    // publish odometry
+    nav_msgs::Odometry laserOdometry;
+    laserOdometry.header.frame_id = "/camera_init";
+    laserOdometry.child_frame_id = "/laser_odom";
+    laserOdometry.header.stamp = laserCloudMsg->header.stamp;
+    laserOdometry.pose.pose.orientation.x = q_w_curr.x();
+    laserOdometry.pose.pose.orientation.y = q_w_curr.y();
+    laserOdometry.pose.pose.orientation.z = q_w_curr.z();
+    laserOdometry.pose.pose.orientation.w = q_w_curr.w();
+    laserOdometry.pose.pose.position.x = t_w_curr.x();
+    laserOdometry.pose.pose.position.y = t_w_curr.y();
+    laserOdometry.pose.pose.position.z = t_w_curr.z();
+    pubLaserOdometry.publish(laserOdometry);
+    geometry_msgs::PoseStamped laserPose;
+    nav_msgs::Path laserPath;
+    laserPose.header = laserOdometry.header;
+    laserPose.pose = laserOdometry.pose.pose;
+    laserPath.header.stamp = laserOdometry.header.stamp;
+    laserPath.poses.push_back(laserPose);
+    laserPath.header.frame_id = "/camera_init";
+    pubLaserPath.publish(laserPath);
     
     std::cout << " mvAggregationKeypoints size is : " << mvAggregationKeypoints.size() << std::endl;
 }
@@ -552,6 +582,11 @@ int main(int argc, char **argv)
 
     pubRemovePoints = nh.advertise<sensor_msgs::PointCloud2>("/laser_remove_points", 100);
     pubLink3DKeyPoints = nh.advertise<sensor_msgs::PointCloud2>("/laser_link3d_keypoints", 100);
+
+    // 发布里程计
+    pubLaserOdometry = nh.advertise<nav_msgs::Odometry>("/laser_odom_to_init", 100);
+    // 发布轨迹
+    pubLaserPath = nh.advertise<nav_msgs::Path>("/laser_odom_path", 100);
 
     if(PUB_EACH_LINE)
     {

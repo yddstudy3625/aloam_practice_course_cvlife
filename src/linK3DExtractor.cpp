@@ -1,5 +1,7 @@
 #include "linK3DExtractor.h"
 
+using namespace cv;
+
 namespace BoW3D
 {
     LinK3D_Extractor::LinK3D_Extractor(
@@ -855,7 +857,76 @@ namespace BoW3D
         }
     }
 
-    void LinK3D_Extractor::process(pcl::PointCloud<pcl::PointXYZ>::Ptr pLaserCloudIn, vector<pcl::PointXYZI> &keyPoints, cv::Mat &descriptors, ScanEdgePoints &validCluster)
+    void LinK3D_Extractor::CeresICP(vector<pcl::PointXYZI> &keyPoints, vector<pcl::PointXYZI> &keyPoints_last, 
+                                    vector<pair<int, int>> &index_match, ros::Time &timestamp_ros,
+                                    Eigen::Quaterniond &q_w_curr, Eigen::Vector3d &t_w_curr) 
+    {
+        vector<cv::Point3f> points_cur, points_last;
+        for (size_t i = 0; i < index_match.size(); i++)
+        {
+            cv::Point3f point_cur, point_last;
+            point_cur.x = keyPoints[index_match[i].first].x;
+            point_cur.y = keyPoints[index_match[i].first].y;
+            point_cur.z = keyPoints[index_match[i].first].z;
+            point_last.x = keyPoints[index_match[i].second].x;
+            point_last.y = keyPoints[index_match[i].second].y;
+            point_last.z = keyPoints[index_match[i].second].z;
+            points_cur.emplace_back(point_cur);
+            points_last.emplace_back(point_last);
+        }
+
+        static double T_currToLast[6] = {0,0,0,0,0,0};
+
+        // static Eigen::Quaterniond q_w_curr(1, 0, 0, 0);
+        // static Eigen::Vector3d t_w_curr(0, 0, 0);
+
+        Eigen::Quaterniond q_last_curr;
+        Eigen::Vector3d t_last_curr;
+
+        ceres::Problem problem;
+        for (size_t i = 0; i < points_cur.size(); i++) {
+            // ceres::CostFunction *cost_function = ICPCeres::Create(points_last[i],points_cur[i]);
+            ceres::CostFunction *cost_function = ICPCeres::Create(points_cur[i],points_last[i]);
+            ceres::LossFunction *lost_function = new ceres::HuberLoss(0.1);
+            problem.AddResidualBlock(cost_function,lost_function,T_currToLast);
+        }
+        
+        ceres::Solver::Options options;
+        options.max_num_iterations = 4;
+        options.linear_solver_type = ceres::DENSE_SCHUR;
+        options.minimizer_progress_to_stdout = false;
+
+        ceres::Solver::Summary summary;
+        ceres::Solve(options, &problem, &summary);
+
+
+        Mat R_vec = (Mat_<double>(3,1) << T_currToLast[0], T_currToLast[1], T_currToLast[2]);
+        Mat R_cvest;
+        // 罗德里格斯公式，旋转向量转旋转矩阵
+        cv::Rodrigues(R_vec, R_cvest);
+        Eigen::Matrix<double,3,3> R_est;
+        cv::cv2eigen(R_cvest, R_est);
+        Eigen::Quaterniond q(R_est.inverse());
+        q.normalize();
+        q_last_curr = q;
+        //cout << "q = \n" << q.x() << " " << q.y() << " " << q.z() << " " << q.w()<< endl;
+        //cout << -T_currToLast[3] << " " <<  -T_currToLast[4] << " " << -T_currToLast[5] << endl;
+        //cout<<"R_est="<<R_est<<endl;
+        Eigen::Vector3d t_est(T_currToLast[3], T_currToLast[4], T_currToLast[5]);
+        t_last_curr = -t_est;
+        cout<<" t_est ======================= " << t_est <<endl;
+        Eigen::Isometry3d T(R_est);//构造变换矩阵与输出
+        T.pretranslate(t_est);
+        //cout << "T = \n" << T.matrix().inverse()<<endl;
+        t_w_curr = t_w_curr + q_w_curr * t_last_curr;
+        q_w_curr = q_w_curr * q_last_curr;
+    
+    }
+
+    void LinK3D_Extractor::process(pcl::PointCloud<pcl::PointXYZ>::Ptr pLaserCloudIn, 
+                                   vector<pcl::PointXYZI> &keyPoints, cv::Mat &descriptors, 
+                                   ScanEdgePoints &validCluster, ros::Time &timestamp_ros,
+                                   Eigen::Quaterniond &q_w_curr, Eigen::Vector3d &t_w_curr)
     {
         ScanEdgePoints edgePoints;
         // 1. 提取当前帧的边缘点。根据线束存储边缘点
@@ -872,10 +943,13 @@ namespace BoW3D
         // 3. 创建描述子
         getDescriptors(keyPoints, descriptors);
 
-        if(!keyPoints_last_.size()) {
+        if(keyPoints_last_.size()) {
             vector<pair<int, int>> index_match;
             index_match.clear();
             match(keyPoints, keyPoints_last_, descriptors, descriptors_last_, index_match);
+
+            CeresICP(keyPoints, keyPoints_last_, index_match, timestamp_ros, q_w_curr, t_w_curr);
+            cout<<" index_match.size ======================= " << index_match.size() <<endl;
         }
 
         keyPoints_last_.assign(keyPoints.begin(),keyPoints.end());
